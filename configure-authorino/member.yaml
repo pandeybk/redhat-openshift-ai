@@ -1,0 +1,44 @@
+# oc new-project redhat-ods-applications-auth-provider
+apiVersion: maistra.io/v1
+kind: ServiceMeshMember
+metadata:
+  name: default
+  namespace: redhat-ods-applications-auth-provider
+spec:
+  controlPlaneRef:
+    namespace: istio-system
+    name: data-science-smcp
+
+---
+apiVersion: operator.authorino.kuadrant.io/v1beta1
+kind: Authorino
+metadata:
+  name: authorino
+  namespace: redhat-ods-applications-auth-provider
+spec:
+  authConfigLabelSelectors: security.opendatahub.io/authorization-group=default
+  clusterWide: true
+  listener:
+    tls:
+      enabled: false
+  oidcServer:
+    tls:
+      enabled: false
+---
+## oc patch deployment authorino -n redhat-ods-applications-auth-provider -p '{"spec": {"template":{"metadata":{"labels":{"sidecar.istio.io/inject":"true"}}}} }'
+
+## oc get servicemeshmemberroll -n istio-system   default
+---
+cat <<EOF > authorino-smcp-patch.yaml
+spec:
+  techPreview:
+    meshConfig:
+      extensionProviders:
+        - name: redhat-ods-applications-auth-provider
+          envoyExtAuthzGrpc:
+            service: authorino-authorino-authorization.redhat-ods-applications-auth-provider.svc.cluster.local
+            port: 50051
+EOF
+
+## oc patch smcp data-science-smcp --type merge -n istio-system --patch-file authorino-smcp-patch.yaml
+
