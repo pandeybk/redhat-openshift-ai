@@ -1,0 +1,605 @@
+# PIPELINE DEFINITION
+# Name: predictive-model-pipeline
+# Description: A pipeline that downloads data, preprocesses it, trains a model, evaluates it, exports it to ONNX format, and uploads it to S3.
+# Inputs:
+#    aws_access_key_id: str [Default: 'minio']
+#    aws_secret_access_key: str [Default: 'minio123']
+#    bucket_name: str [Default: 'predictive-model-training']
+#    dataset: str [Default: 'mrwellsdavid/unsw-nb15']
+#    endpoint_url: str [Default: 'http://minio-service.netsentinel:9000']
+#    region_name: str [Default: 'us-east-1']
+components:
+  comp-download-dataset-component:
+    executorLabel: exec-download-dataset-component
+    inputDefinitions:
+      parameters:
+        dataset:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        download_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-evaluate-model-component:
+    executorLabel: exec-evaluate-model-component
+    inputDefinitions:
+      artifacts:
+        model_input_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        processed_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-export-model-to-onnx-component:
+    executorLabel: exec-export-model-to-onnx-component
+    inputDefinitions:
+      artifacts:
+        model_input_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        processed_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        onnx_model_output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-preprocess-data-component:
+    executorLabel: exec-preprocess-data-component
+    inputDefinitions:
+      artifacts:
+        raw_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        processed_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-train-model-component:
+    executorLabel: exec-train-model-component
+    inputDefinitions:
+      artifacts:
+        processed_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        model_output_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-upload-to-s3-component:
+    executorLabel: exec-upload-to-s3-component
+    inputDefinitions:
+      artifacts:
+        directory_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        aws_access_key_id:
+          defaultValue: minio
+          isOptional: true
+          parameterType: STRING
+        aws_secret_access_key:
+          defaultValue: minio123
+          isOptional: true
+          parameterType: STRING
+        bucket_name:
+          parameterType: STRING
+        endpoint_url:
+          defaultValue: http://minio:9000
+          isOptional: true
+          parameterType: STRING
+        region_name:
+          defaultValue: us-east-1
+          isOptional: true
+          parameterType: STRING
+        s3_prefix:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-download-dataset-component:
+      container:
+        args:
+          - --executor_input
+          - "{{$}}"
+          - --function_to_execute
+          - download_dataset_component
+        command:
+          - sh
+          - -c
+          - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+            \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+            \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+            \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+            \  python3 -m pip install --quiet --no-warn-script-location 'kaggle' &&\
+            \ \"$0\" \"$@\"\n"
+          - sh
+          - -ec
+          - 'program_path=$(mktemp -d)
+
+
+            printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+            _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+            '
+          - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+            \ *\n\ndef download_dataset_component(\n    dataset: str,\n    download_path:\
+            \ OutputPath(),\n):\n    import os\n    from kaggle.api.kaggle_api_extended\
+            \ import KaggleApi\n\n    api = KaggleApi()\n    api.authenticate()\n\n\
+            \    if not os.path.exists(download_path):\n        os.makedirs(download_path)\n\
+            \n    print(f\"Downloading dataset '{dataset}'...\")\n    api.dataset_download_files(dataset,\
+            \ path=download_path, unzip=True)\n\n    print(f\"Dataset downloaded and\
+            \ extracted to '{download_path}'.\")\n    print(f\"Files in download_path:\
+            \ {os.listdir(download_path)}\")\n\n"
+        image: python:3.8
+    exec-evaluate-model-component:
+      container:
+        args:
+          - --executor_input
+          - "{{$}}"
+          - --function_to_execute
+          - evaluate_model_component
+        command:
+          - sh
+          - -c
+          - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+            \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+            \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+            \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+            \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+            \ 'joblib' 'pandas' 'matplotlib' 'seaborn' && \"$0\" \"$@\"\n"
+          - sh
+          - -ec
+          - 'program_path=$(mktemp -d)
+
+
+            printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+            _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+            '
+          - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+            \ *\n\ndef evaluate_model_component(\n    model_input_path: InputPath(),\n\
+            \    processed_data_path: InputPath(),\n):\n    import os\n    import joblib\n\
+            \    import pandas as pd\n    import numpy as np\n    import matplotlib.pyplot\
+            \ as plt\n    import seaborn as sns\n    from sklearn.metrics import classification_report,\
+            \ confusion_matrix\n\n    # Load model and test data\n    model = joblib.load(os.path.join(model_input_path,\
+            \ 'model.joblib'))\n    X_test = joblib.load(os.path.join(model_input_path,\
+            \ 'X_test.pkl'))\n    y_test = joblib.load(os.path.join(model_input_path,\
+            \ 'y_test.pkl'))\n\n    # Load label encoder\n    label_encoder = joblib.load(os.path.join(processed_data_path,\
+            \ 'label_encoder.joblib'))\n\n    # Predict on test data\n    y_pred = model.predict(X_test)\n\
+            \n    # Ensure y_test and y_pred are 1D arrays\n    y_test = np.array(y_test).flatten()\n\
+            \    y_pred = np.array(y_pred).flatten()\n\n    # Map numerical labels back\
+            \ to category names\n    label_mapping = dict(zip(label_encoder.transform(label_encoder.classes_),\
+            \ label_encoder.classes_))\n    y_test_labels = [label_mapping[label] for\
+            \ label in y_test]\n    y_pred_labels = [label_mapping[label] for label\
+            \ in y_pred]\n\n    # Debugging prints\n    print(\"y_test_labels type:\"\
+            , type(y_test_labels))\n    print(\"y_pred_labels type:\", type(y_pred_labels))\n\
+            \    print(\"y_test_labels length:\", len(y_test_labels))\n    print(\"\
+            y_pred_labels length:\", len(y_pred_labels))\n    print(\"Unique labels\
+            \ in y_test_labels:\", np.unique(y_test_labels))\n    print(\"Unique labels\
+            \ in y_pred_labels:\", np.unique(y_pred_labels))\n\n    # Classification\
+            \ report\n    print(\"Classification Report:\")\n    print(classification_report(y_test_labels,\
+            \ y_pred_labels))\n\n"
+        image: python:3.8
+    exec-export-model-to-onnx-component:
+      container:
+        args:
+          - --executor_input
+          - "{{$}}"
+          - --function_to_execute
+          - export_model_to_onnx_component
+        command:
+          - sh
+          - -c
+          - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+            \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+            \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+            \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+            \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+            \ 'joblib' 'skl2onnx' 'onnx' 'pandas' && \"$0\" \"$@\"\n"
+          - sh
+          - -ec
+          - 'program_path=$(mktemp -d)
+
+
+            printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+            _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+            '
+          - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+            \ *\n\ndef export_model_to_onnx_component(\n    model_input_path: InputPath(),\n\
+            \    processed_data_path: InputPath(),\n    onnx_model_output_path: OutputPath(),\n\
+            ):\n    import os\n    import joblib\n    import pandas as pd\n    import\
+            \ numpy as np\n    from skl2onnx import convert_sklearn\n    from skl2onnx.common.data_types\
+            \ import FloatTensorType\n    import onnx\n\n    # Load model\n    model\
+            \ = joblib.load(os.path.join(model_input_path, 'model.joblib'))\n\n    #\
+            \ Load sample input to get feature shape\n    X = pd.read_pickle(os.path.join(processed_data_path,\
+            \ 'X.pkl'))\n    X_values = X.values.astype(np.float32)\n    n_features\
+            \ = X_values.shape[1]\n\n    # Define the initial type\n    initial_type\
+            \ = [('float_input', FloatTensorType([None, n_features]))]\n\n    # Set\
+            \ options to ensure all components are included\n    options = {id(model):\
+            \ {'zipmap': False}}\n\n    # Convert the model\n    onnx_model = convert_sklearn(model,\
+            \ initial_types=initial_type, options=options, target_opset=12)\n\n    #\
+            \ Apply the patch directly to the ONNX model\n    for output in onnx_model.graph.output:\n\
+            \        if output.name == \"label\":\n            # Ensure the first dimension\
+            \ exists for dynamic batch size\n            if len(output.type.tensor_type.shape.dim)\
+            \ < 1:\n                output.type.tensor_type.shape.dim.add()  # Add a\
+            \ new dimension\n            output.type.tensor_type.shape.dim[0].dim_param\
+            \ = \"batch_size\"  # Dynamic batch size\n\n            # Ensure the second\
+            \ dimension exists for scalar output\n            if len(output.type.tensor_type.shape.dim)\
+            \ < 2:\n                output.type.tensor_type.shape.dim.add()  # Add a\
+            \ new dimension\n            output.type.tensor_type.shape.dim[1].dim_value\
+            \ = 1  # Fixed scalar output\n\n    # Save the patched ONNX model\n    os.makedirs(onnx_model_output_path,\
+            \ exist_ok=True)\n    # Create the directory structure\n    model_dir =\
+            \ os.path.join(onnx_model_output_path, '1')\n    os.makedirs(model_dir,\
+            \ exist_ok=True)\n    onnx_model_path = os.path.join(model_dir, 'model.onnx')\n\
+            \    with open(onnx_model_path, 'wb') as f:\n        f.write(onnx_model.SerializeToString())\n\
+            \n    # Create config.pbtxt\n    config_pbtxt_content = '''\n    name: \"\
+            netsentinel\"\n    platform: \"onnxruntime_onnx\"\n    max_batch_size: 8\n\
+            \    output [\n      {\n        name: \"label\"\n        data_type: TYPE_INT64\n\
+            \        dims: [1] \n      },\n      {\n        name: \"probabilities\"\n\
+            \        data_type: TYPE_FP32\n        dims: [11] \n      }\n    ]\n   \
+            \ '''\n    config_pbtxt_path = os.path.join(onnx_model_output_path, 'config.pbtxt')\n\
+            \    with open(config_pbtxt_path, 'w') as f:\n        f.write(config_pbtxt_content.strip())\n\
+            \n    print(f\"RandomForestClassifier model exported to ONNX format with\
+            \ patched output shape at {onnx_model_path}\")\n    print(f\"Config.pbtxt\
+            \ file created at {config_pbtxt_path}\")\n\n"
+        image: python:3.8
+    exec-preprocess-data-component:
+      container:
+        args:
+          - --executor_input
+          - "{{$}}"
+          - --function_to_execute
+          - preprocess_data_component
+        command:
+          - sh
+          - -c
+          - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+            \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+            \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+            \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+            \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+            \ 'scikit-learn' 'joblib' && \"$0\" \"$@\"\n"
+          - sh
+          - -ec
+          - 'program_path=$(mktemp -d)
+
+
+            printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+            _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+            '
+          - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+            \ *\n\ndef preprocess_data_component(\n    raw_data_path: InputPath(),\n\
+            \    processed_data_path: OutputPath(),\n):\n    import os\n    import pandas\
+            \ as pd\n    import numpy as np\n    from sklearn.preprocessing import OrdinalEncoder,\
+            \ StandardScaler, LabelEncoder\n    import joblib\n\n    # List files in\
+            \ raw_data_path\n    print(f\"Files in raw_data_path: {os.listdir(raw_data_path)}\"\
+            )\n\n    # Read the features file to get the column names\n    features_file\
+            \ = os.path.join(raw_data_path, \"NUSW-NB15_features.csv\")\n    if not\
+            \ os.path.exists(features_file):\n        raise FileNotFoundError(f\"Features\
+            \ file not found at {features_file}\")\n    features = pd.read_csv(features_file,\
+            \ encoding='cp1252')\n    feature_names = features['Name'].tolist()\n\n\
+            \    # Read UNSW-NB15 CSV files\n    csv_files = [os.path.join(raw_data_path,\
+            \ f\"UNSW-NB15_{i}.csv\") for i in range(1, 5)]\n    dataframes = []\n \
+            \   for csv_file in csv_files:\n        if not os.path.exists(csv_file):\n\
+            \            raise FileNotFoundError(f\"Data file not found: {csv_file}\"\
+            )\n        print(f\"Reading {csv_file}\")\n        df = pd.read_csv(csv_file,\
+            \ header=None, names=feature_names, encoding='latin1', low_memory=False)\n\
+            \        dataframes.append(df)\n        print(f\"Loaded {csv_file} with\
+            \ shape {df.shape}\")\n\n    # Concatenate dataframes\n    train_df = pd.concat(dataframes,\
+            \ ignore_index=True)\n    print(f\"Dataset shape after concatenation: {train_df.shape}\"\
+            )\n\n    # Shuffle the data\n    train_df = train_df.sample(frac=1, random_state=42).reset_index(drop=True)\n\
+            \n    # Remove duplicates\n    train_df = train_df.drop_duplicates()\n \
+            \   print(f\"Dataset shape after removing duplicates: {train_df.shape}\"\
+            )\n\n    # Explicitly define columns to exclude\n    columns_to_exclude\
+            \ = ['srcip', 'sport', 'dstip', 'dsport', 'Stime', 'Ltime', 'Label', 'attack_cat']\n\
+            \n    # Define categorical columns (excluding columns_to_exclude)\n    categorical_cols\
+            \ = [\n        'proto', 'state', 'service',\n        'ct_ftp_cmd',  # If\
+            \ you decide to treat this as categorical\n    ]\n\n    # Ensure these columns\
+            \ are treated as strings\n    train_df[categorical_cols] = train_df[categorical_cols].astype(str)\n\
+            \n    # Handle missing values in categorical columns\n    train_df[categorical_cols]\
+            \ = train_df[categorical_cols].fillna('Unknown')\n\n    # Handle missing\
+            \ values in numerical columns\n    numerical_cols = [col for col in train_df.columns\
+            \ if col not in categorical_cols + columns_to_exclude]\n    train_df[numerical_cols]\
+            \ = train_df[numerical_cols].fillna(train_df[numerical_cols].median())\n\
+            \    print(\"Missing values handled.\")\n\n    # Fix spaces in attack_cat\
+            \ and handle missing values\n    if 'attack_cat' in train_df.columns:\n\
+            \        train_df['attack_cat'] = train_df['attack_cat'].str.strip()  #\
+            \ Remove leading and trailing spaces\n        train_df['attack_cat'] = train_df['attack_cat'].fillna('Unknown')\
+            \  # Replace missing values with 'Unknown'\n\n    # Explicitly reorder 'attack_cat'\
+            \ so 'Unknown' is first\n    categories = train_df['attack_cat'].unique().tolist()\n\
+            \    categories.remove('Unknown')\n    categories = ['Unknown'] + sorted(categories)\n\
+            \    train_df['attack_cat'] = pd.Categorical(train_df['attack_cat'], categories=categories,\
+            \ ordered=True)\n    print(f\"Unique values in attack_cat after ordering:\
+            \ {train_df['attack_cat'].unique()}\")\n\n    # Encode categorical variables\
+            \ using OrdinalEncoder\n    ordinal_encoder = OrdinalEncoder(handle_unknown='use_encoded_value',\
+            \ unknown_value=-1)\n    train_df[categorical_cols] = ordinal_encoder.fit_transform(train_df[categorical_cols])\n\
+            \    print(f\"Categorical variables encoded using OrdinalEncoder: {categorical_cols}\"\
+            )\n\n    # Separate features and target\n    X = train_df.drop(columns=columns_to_exclude)\n\
+            \    y = train_df['attack_cat']\n\n    # Encode target variable explicitly\
+            \ ensuring 'Unknown' is 0\n    label_encoder = LabelEncoder()\n    label_encoder.classes_\
+            \ = np.array(categories)  # Explicitly set the order of classes\n    y_encoded\
+            \ = label_encoder.transform(y)\n    print(\"Target variable encoded.\")\n\
+            \n    # Display the class mapping\n    class_mapping = dict(zip(label_encoder.classes_,\
+            \ label_encoder.transform(label_encoder.classes_)))\n    print(f\"Class\
+            \ mapping: {class_mapping}\")\n\n    # Scale numerical features\n    scaler\
+            \ = StandardScaler()\n    X[numerical_cols] = scaler.fit_transform(X[numerical_cols])\n\
+            \    print(\"Numerical features scaled.\")\n\n    # Save preprocessed data\
+            \ and encoders\n    os.makedirs(processed_data_path, exist_ok=True)\n  \
+            \  X.to_pickle(os.path.join(processed_data_path, 'X.pkl'))\n    joblib.dump(y_encoded,\
+            \ os.path.join(processed_data_path, 'y_encoded.pkl'))\n    joblib.dump(ordinal_encoder,\
+            \ os.path.join(processed_data_path, 'ordinal_encoder.joblib'))\n    joblib.dump(scaler,\
+            \ os.path.join(processed_data_path, 'scaler.joblib'))\n    joblib.dump(label_encoder,\
+            \ os.path.join(processed_data_path, 'label_encoder.joblib'))\n    print(f\"\
+            Processed data and encoders saved to {processed_data_path}\")\n\n"
+        image: python:3.8
+    exec-train-model-component:
+      container:
+        args:
+          - --executor_input
+          - "{{$}}"
+          - --function_to_execute
+          - train_model_component
+        command:
+          - sh
+          - -c
+          - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+            \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+            \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+            \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+            \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn'\
+            \ 'joblib' 'pandas' && \"$0\" \"$@\"\n"
+          - sh
+          - -ec
+          - 'program_path=$(mktemp -d)
+
+
+            printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+            _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+            '
+          - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+            \ *\n\ndef train_model_component(\n    processed_data_path: InputPath(),\n\
+            \    model_output_path: OutputPath(),\n):\n    import os\n    import joblib\n\
+            \    from sklearn.model_selection import train_test_split\n    from sklearn.ensemble\
+            \ import RandomForestClassifier\n    import pandas as pd\n    import numpy\
+            \ as np\n\n    # Load preprocessed data\n    X = pd.read_pickle(os.path.join(processed_data_path,\
+            \ 'X.pkl'))\n    y_encoded = joblib.load(os.path.join(processed_data_path,\
+            \ 'y_encoded.pkl'))\n\n    # Convert X to NumPy array\n    X_values = X.values.astype(np.float32)\n\
+            \n    # Split data\n    X_train, X_test, y_train, y_test = train_test_split(\n\
+            \        X_values, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded\n\
+            \    )\n    print(\"Train-test split completed.\")\n\n    # Model training\
+            \ using RandomForestClassifier\n    model = RandomForestClassifier(n_estimators=100,\
+            \ random_state=42, n_jobs=-1)\n    model.fit(X_train, y_train)\n    print(\"\
+            RandomForestClassifier model training completed.\")\n\n    # Save model\
+            \ and test data\n    os.makedirs(model_output_path, exist_ok=True)\n   \
+            \ joblib.dump(model, os.path.join(model_output_path, 'model.joblib'))\n\
+            \    joblib.dump(X_test, os.path.join(model_output_path, 'X_test.pkl'))\n\
+            \    joblib.dump(y_test, os.path.join(model_output_path, 'y_test.pkl'))\n\
+            \    print(f\"Model and test data saved to {model_output_path}\")\n\n"
+        image: python:3.8
+    exec-upload-to-s3-component:
+      container:
+        args:
+          - --executor_input
+          - "{{$}}"
+          - --function_to_execute
+          - upload_to_s3_component
+        command:
+          - sh
+          - -c
+          - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+            \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+            \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+            \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+            \  python3 -m pip install --quiet --no-warn-script-location 'boto3' && \"\
+            $0\" \"$@\"\n"
+          - sh
+          - -ec
+          - 'program_path=$(mktemp -d)
+
+
+            printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+            _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+            '
+          - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+            \ *\n\ndef upload_to_s3_component(\n    directory_path: InputPath(),\n \
+            \   bucket_name: str,\n    s3_prefix: str,\n    endpoint_url: str = 'http://minio:9000',\n\
+            \    aws_access_key_id: str = 'minio',\n    aws_secret_access_key: str =\
+            \ 'minio123',\n    region_name: str = 'us-east-1',\n):\n    import boto3\n\
+            \    import logging\n    import os\n    from botocore.exceptions import\
+            \ NoCredentialsError, ClientError\n\n    # Setup logging\n    logging.basicConfig(\n\
+            \        level=logging.INFO,\n        format='%(asctime)s - %(levelname)s\
+            \ - %(message)s',\n        handlers=[logging.StreamHandler()]\n    )\n\n\
+            \    def upload_directory_to_s3(directory_path, bucket_name, s3_prefix):\n\
+            \        s3 = boto3.client(\n            's3',\n            aws_access_key_id=aws_access_key_id,\n\
+            \            aws_secret_access_key=aws_secret_access_key,\n            endpoint_url=endpoint_url,\n\
+            \            region_name=region_name,\n        )\n        for root, dirs,\
+            \ files in os.walk(directory_path):\n            for file in files:\n  \
+            \              local_path = os.path.join(root, file)\n                relative_path\
+            \ = os.path.relpath(local_path, directory_path)\n                s3_key\
+            \ = os.path.join(s3_prefix, relative_path)\n                try:\n     \
+            \               s3.upload_file(local_path, bucket_name, s3_key)\n      \
+            \              logging.info(f\"Uploaded {local_path} to s3://{bucket_name}/{s3_key}\"\
+            )\n                except Exception as e:\n                    logging.error(f\"\
+            Failed to upload {local_path}: {e}\")\n\n    upload_directory_to_s3(directory_path,\
+            \ bucket_name, s3_prefix)\n    logging.info(\"Upload completed.\")\n\n"
+        image: python:3.8
+pipelineInfo:
+  description:
+    A pipeline that downloads data, preprocesses it, trains a model, evaluates
+    it, exports it to ONNX format, and uploads it to S3.
+  name: predictive-model-pipeline
+root:
+  dag:
+    tasks:
+      download-dataset-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-dataset-component
+        inputs:
+          parameters:
+            dataset:
+              componentInputParameter: dataset
+        taskInfo:
+          name: download-dataset-component
+      evaluate-model-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-model-component
+        dependentTasks:
+          - preprocess-data-component
+          - train-model-component
+        inputs:
+          artifacts:
+            model_input_path:
+              taskOutputArtifact:
+                outputArtifactKey: model_output_path
+                producerTask: train-model-component
+            processed_data_path:
+              taskOutputArtifact:
+                outputArtifactKey: processed_data_path
+                producerTask: preprocess-data-component
+        taskInfo:
+          name: evaluate-model-component
+      export-model-to-onnx-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-export-model-to-onnx-component
+        dependentTasks:
+          - preprocess-data-component
+          - train-model-component
+        inputs:
+          artifacts:
+            model_input_path:
+              taskOutputArtifact:
+                outputArtifactKey: model_output_path
+                producerTask: train-model-component
+            processed_data_path:
+              taskOutputArtifact:
+                outputArtifactKey: processed_data_path
+                producerTask: preprocess-data-component
+        taskInfo:
+          name: export-model-to-onnx-component
+      preprocess-data-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-data-component
+        dependentTasks:
+          - download-dataset-component
+        inputs:
+          artifacts:
+            raw_data_path:
+              taskOutputArtifact:
+                outputArtifactKey: download_path
+                producerTask: download-dataset-component
+        taskInfo:
+          name: preprocess-data-component
+      train-model-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model-component
+        dependentTasks:
+          - preprocess-data-component
+        inputs:
+          artifacts:
+            processed_data_path:
+              taskOutputArtifact:
+                outputArtifactKey: processed_data_path
+                producerTask: preprocess-data-component
+        taskInfo:
+          name: train-model-component
+      upload-to-s3-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-upload-to-s3-component
+        dependentTasks:
+          - export-model-to-onnx-component
+        inputs:
+          artifacts:
+            directory_path:
+              taskOutputArtifact:
+                outputArtifactKey: onnx_model_output_path
+                producerTask: export-model-to-onnx-component
+          parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
+            bucket_name:
+              componentInputParameter: bucket_name
+            endpoint_url:
+              componentInputParameter: endpoint_url
+            region_name:
+              componentInputParameter: region_name
+            s3_prefix:
+              runtimeValue:
+                constant: netsentinel/bdc008d1-0109-45e5-b7a1-06b77f2a120d/
+        taskInfo:
+          name: upload-to-s3-component
+  inputDefinitions:
+    parameters:
+      aws_access_key_id:
+        defaultValue: minio
+        isOptional: true
+        parameterType: STRING
+      aws_secret_access_key:
+        defaultValue: minio123
+        isOptional: true
+        parameterType: STRING
+      bucket_name:
+        defaultValue: predictive-model-training
+        isOptional: true
+        parameterType: STRING
+      dataset:
+        defaultValue: mrwellsdavid/unsw-nb15
+        isOptional: true
+        parameterType: STRING
+      endpoint_url:
+        defaultValue: http://minio-service.netsentinel:9000
+        isOptional: true
+        parameterType: STRING
+      region_name:
+        defaultValue: us-east-1
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.9.0
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-download-dataset-component:
+          secretAsVolume:
+            - mountPath: /.config/kaggle
+              optional: false
+              secretName: kaggle-secret
