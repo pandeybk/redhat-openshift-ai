@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>MNIST Handwritten Digit Prediction</title>
+  <style>
+    #canvasDiv {
+      border: 2px solid #ccc;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+    #myCanvas {
+      cursor: crosshair;
+      /* We'll fill the background with black in JavaScript to ensure saved pixels are black. */
+    }
+    .btn {
+      margin: 5px;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>MNIST Handwritten Digit Prediction</h1>
+  <p>Draw a digit (0–9) below (white on black), then click "Predict".</p>
+
+  <div id="canvasDiv">
+    <canvas id="myCanvas" width="280" height="280"></canvas>
+  </div>
+  <br/>
+  <button class="btn" id="predictBtn">Predict</button>
+  <button class="btn" id="clearBtn">Clear</button>
+
+  <h2 id="result"></h2>
+
+  <script>
+    const canvas = document.getElementById("myCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // First fill entire canvas with black so the background is actually black in the pixel data
+    function fillBlackBackground() {
+      ctx.fillStyle = "#000000"; // black
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    fillBlackBackground();
+
+    // Set white stroke for drawing
+    ctx.lineWidth = 10;       // Adjust thickness as needed
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#FFFFFF";  // white lines
+
+    let drawing = false;
+
+    // Mouse events for drawing
+    canvas.addEventListener("mousedown", (e) => {
+      drawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (drawing) {
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      drawing = false;
+    });
+    canvas.addEventListener("mouseleave", () => {
+      drawing = false;
+    });
+
+    // Clear button
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      fillBlackBackground();
+      document.getElementById("result").textContent = "";
+    });
+
+    // Predict button
+    document.getElementById("predictBtn").addEventListener("click", () => {
+      // Convert canvas to Base64
+      const dataURL = canvas.toDataURL("image/png");
+
+      // Send POST request to /predict endpoint
+      fetch("/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataURL })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.predicted_class !== undefined) {
+          document.getElementById("result").textContent =
+            "Predicted digit: " + data.predicted_class;
+        } else if (data.error) {
+          document.getElementById("result").textContent =
+            "Error: " + data.error + " " + (data.details || "");
+        }
+      })
+      .catch(err => {
+        document.getElementById("result").textContent = "Error: " + err;
+      });
+    });
+  </script>
+</body>
+</html>
