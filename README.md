@@ -21,7 +21,7 @@
   - [ ] **Node Features Discovery Operator** – Detects hardware capabilities.
   - [ ] **Serverless Operator**
         – Enables **Knative Serving**, which is a foundation for event-driven, autoscaled workloads, and KServe is built on top of Knative.
-  -     KServe handles single and multi-model serving and leverages Knative (enabled by Serverless Operator) for features like autoscaling and revisions.
+        -  KServe handles single and multi-model serving and leverages Knative (enabled by Serverless Operator) for features like autoscaling and revisions.
   - [ ] **Service Mesh Operator** – Controls traffic and security for AI models, manage multi model server
   - [ ] **Storage Class/Controller Setup** – Manages persistent storage.
   - [ ] **Authorino Operator** – Handles API authentication and authorization.
